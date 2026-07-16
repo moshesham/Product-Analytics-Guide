@@ -1,0 +1,8 @@
+{
+  "name": "Analytics Interview Playbook",
+  "description": "A study guide and playbook for Senior Product/Data Analyst and Analytics Engineering interviews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
