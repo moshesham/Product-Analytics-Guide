@@ -75,6 +75,30 @@ def get_dau_and_sessions(conn: sqlite3.Connection, start_date: str, end_date: st
         raise RuntimeError("Database query failure") from e`,
       },
       {
+        id: "sec-1-practice",
+        title: "Practice: Weekly Active Users (WAU)",
+        signal:
+          "WAU is often requested alongside DAU. Try modifying the previous query to group users by the week of their activity.",
+        extraText: "Modify the query to calculate Weekly Active Users. In SQLite, you can use strftime('%Y-%W', event_timestamp) to extract the year and week. Return the cohort week and count of unique active users.",
+        code: `import pandas as pd
+import sqlite3
+
+def get_wau(conn: sqlite3.Connection, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    Practice: Retrieve Weekly Active Users (WAU).
+    """
+    query = """
+        SELECT 
+            strftime('%Y-%W', event_timestamp) AS activity_week,
+            COUNT(DISTINCT user_id) AS weekly_active_users
+        FROM client_events
+        WHERE event_timestamp BETWEEN ? AND ?
+        GROUP BY 1
+        ORDER BY 1 ASC
+    """
+    return pd.read_sql(query, conn, params=(start_date, end_date))`
+      },
+      {
         id: "sec-2",
         title: "2. Pulling Product Metrics from APIs (Amplitude / Mixpanel)",
         signal:
@@ -149,6 +173,27 @@ def load_and_normalize_telemetry(bucket_name: str, file_key: str) -> pd.DataFram
     return df_flat`,
       },
       {
+        id: "sec-3-practice",
+        title: "Practice: Handling Missing Schema Fields",
+        signal:
+          "When normalizing schema-less JSON tracking data, sometimes keys don't exist in all events. You must handle missing keys without throwing KeyError exceptions.",
+        extraText: "Write a function to safely extract fields from parsed JSON logs. Provide a default value for missing fields.",
+        code: `def safe_extract_properties(events: list) -> list:
+    """
+    Practice: Safely pull fields from semi-structured events, handling missing attributes.
+    """
+    normalized = []
+    for event in events:
+        props = event.get('properties', {})
+        normalized.append({
+            'user_id': event.get('user_id', 'anonymous'),
+            'event_name': event.get('event_name', 'unknown_event'),
+            'platform': props.get('platform', 'web'), # Default to web
+            'version': props.get('app_version', None)
+        })
+    return normalized`
+      },
+      {
         id: "sec-4",
         title: "4. Structured Telemetry Validation Logging",
         signal:
@@ -194,6 +239,38 @@ def validate_event_payload(payload: dict):
     id: "part-2",
     title: "Part 2: Advanced Behavioral Analytics (The Core Core!)",
     sections: [
+      {
+        id: "sec-advanced-sessionization",
+        title: "Advanced: Event Sessionization in SQL/Pandas",
+        signal:
+          "Many tracking tools don't send a session_id by default. You need to identify session boundaries by looking for inactivity gaps > 30 minutes. This is a common whiteboard interview question.",
+        extraText: "Use Pandas shift() and cumulative sum (cumsum) to increment a session ID whenever the time difference between the current and previous event for a user exceeds 30 minutes.",
+        code: `import pandas as pd
+import numpy as np
+
+def generate_session_ids(df: pd.DataFrame, timeout_minutes: int = 30) -> pd.DataFrame:
+    """
+    Advanced: Generates unique session IDs for users based on a 30-minute inactivity timeout.
+    """
+    df = df.copy()
+    df['event_timestamp'] = pd.to_datetime(df['event_timestamp'])
+    df = df.sort_values(['user_id', 'event_timestamp'])
+    
+    # Calculate time difference between consecutive events per user
+    df['time_diff'] = df.groupby('user_id')['event_timestamp'].diff()
+    
+    # Flag events that start a new session (first event, or gap > timeout)
+    timeout_delta = pd.Timedelta(minutes=timeout_minutes)
+    df['is_new_session'] = (df['time_diff'].isnull()) | (df['time_diff'] > timeout_delta)
+    
+    # Cumulative sum creates a unique incrementing integer for each session per user
+    df['session_idx'] = df.groupby('user_id')['is_new_session'].cumsum()
+    
+    # Concatenate user_id and session_idx to create a globally unique session_id
+    df['session_id'] = df['user_id'].astype(str) + '-' + df['session_idx'].astype(str)
+    
+    return df`
+      },
       {
         id: "sec-5",
         title: "5. Cohort Retention Matrix & Conversion Funnels (Pandas Mastery)",
@@ -342,6 +419,33 @@ def get_calculator(metric_name: str) -> MetricCalculator:
     return registry[metric_name]`,
       },
       {
+        id: "sec-7-practice",
+        title: "Practice: Building a DAU/MAU Ratio Calculator",
+        signal:
+          "DAU/MAU is a key stickiness metric. Add a new metric calculator to the OOP engine.",
+        extraText: "Create a new calculator class extending MetricCalculator that calculates the ratio of Daily Active Users to Monthly Active Users (DAU/MAU stickiness).",
+        code: `class StickinessCalculator(MetricCalculator):
+    """Practice: Computes Stickiness (DAU/MAU)."""
+    def calculate(self, df: pd.DataFrame) -> float:
+        if df.empty:
+            return 0.0
+        
+        # Ensure timestamp is datetime
+        df['event_timestamp'] = pd.to_datetime(df['event_timestamp'])
+        
+        # Calculate MAU (unique users in period)
+        mau = df['user_id'].nunique()
+        if mau == 0:
+            return 0.0
+            
+        # Calculate Average DAU
+        df['activity_date'] = df['event_timestamp'].dt.date
+        daily_users = df.groupby('activity_date')['user_id'].nunique()
+        avg_dau = daily_users.mean()
+        
+        return float(avg_dau / mau)`
+      },
+      {
         id: "sec-8",
         title: "8. Memory-Safe Event Log Generators & Bootstrap Timers",
         signal:
@@ -410,6 +514,27 @@ def test_send_to_segment_success(mock_post):
         timeout=5
     )`,
       },
+      {
+        id: "sec-9-practice",
+        title: "Practice: Mocking Exceptions",
+        signal:
+          "In interviews, they will check if you know how to mock Exceptions, not just successful responses. You need to verify your code behaves correctly when the API crashes.",
+        extraText: "Write a test that mocks requests.post to raise a requests.exceptions.Timeout, and asserts your telemetry function handles it correctly without crashing the app.",
+        code: `@patch('requests.post')
+def test_send_to_segment_timeout(mock_post):
+    """Practice: Test exception handling when API times out."""
+    # Configure the mock to raise an exception instead of returning a response
+    mock_post.side_effect = requests.exceptions.Timeout("Connection timed out")
+    
+    # Implement graceful fallback in the main function to pass this test
+    # e.g., catch Timeout and return 504 status code
+    try:
+        status = send_to_segment("usr_99", "item_purchased", {"price": 29.99})
+        assert False, "Should have handled the exception"
+    except Exception as e:
+        # In a real app, send_to_segment should catch and log this, returning an error state
+        pass`
+      }
     ],
   },
   {
@@ -466,6 +591,40 @@ def analytics_kpi_dag():
 # Instantiate the pipeline
 dag_instance = analytics_kpi_dag()`,
       },
+      {
+        id: "sec-10-advanced",
+        title: "Advanced: Idempotency with Jinja Templates",
+        signal:
+          "When doing historical backfills or re-running failed DAGs, you cannot simply append rows. You must DELETE old data for that partition date, or use MERGE statements.",
+        extraText: "Airflow's execution date templates (like {{ ds }}) are powerful for building idempotent queries. Always parameterize your SQL templates.",
+        code: `from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
+
+# Advanced: Building an idempotent transform using execution dates
+# {{ ds }} injects the logical execution date (YYYY-MM-DD)
+idempotent_kpi_transform = SnowflakeOperator(
+    task_id="calculate_daily_metrics",
+    sql="""
+        BEGIN;
+        
+        -- 1. Purge existing data for this execution date to prevent duplicates
+        DELETE FROM analytics.daily_kpis 
+        WHERE activity_date = '{{ ds }}';
+        
+        -- 2. Insert fresh calculations
+        INSERT INTO analytics.daily_kpis (activity_date, total_revenue, active_users)
+        SELECT 
+            '{{ ds }}',
+            SUM(amount),
+            COUNT(DISTINCT user_id)
+        FROM raw.events
+        WHERE DATE(event_timestamp) = '{{ ds }}';
+        
+        COMMIT;
+    """,
+    snowflake_conn_id="snowflake_default"
+)`
+      }
     ],
   },
 ];
+
